@@ -40,5 +40,5 @@ let postSchema = mongoose.Schema({
 
 postSchema.virtual('')
 
-console.log(postSchema.paths)
+// console.log(postSchema.paths)
 // console.log(categorySchema.virtuals)

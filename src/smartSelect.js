@@ -66,10 +66,10 @@ const getOtherChildPaths = (allPaths, parentPath, childNames) => {
     let childNameMap = {}
     childNames.forEach(name => childNameMap[name] = true)
     let parentPathLength = parentPath.split('.').filter(bit => bit).length
-    scopedPaths = allPaths.filter(path => path.startsWith(parentPath)).map(path => path.split('.').slice(0, parentPathLength + 1))
-    scopedPaths = [... new Set(scopedPaths)].filter(pathBits => pathBits.length > parentPathLength)
-
-    let otherPaths = scopedPaths.filter(pathBits => !childNameMap[pathBits[parentPathLength]])
+    let scopedPaths = allPaths.filter(path => path.startsWith(parentPath)).map(path => path.split('.').slice(0, parentPathLength + 1))
+    scopedPaths = scopedPaths.filter(pathBits => pathBits.length > parentPathLength)
+    let otherPaths = scopedPaths.filter(pathBits => !childNameMap[pathBits[parentPathLength]]).map(pathBits => pathBits.join('.'))
+    otherPaths = [... new Set(otherPaths)]
     return otherPaths
 }
 
@@ -97,7 +97,7 @@ const parsePath = (schema, allPaths, path, select) => {
 
     if (select.all) {
         let otherPaths = getOtherChildPaths(allPaths, path, select.fields.map(({ name }) => name))
-        result.select.push(otherPaths)
+        result.select.push(...otherPaths)
     }
 
     // Is virtual
