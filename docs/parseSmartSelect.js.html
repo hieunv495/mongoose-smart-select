@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>parseSmartSelect.js - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav>
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#getOtherChildPaths">getOtherChildPaths</a></li><li><a href="global.html#parsePath">parsePath</a></li><li><a href="global.html#parseSchema">parseSchema</a></li><li><a href="global.html#parseSmartSelect">parseSmartSelect</a></li></ul>
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">parseSmartSelect.js</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>const getMongoose = require('./mongooseConfig').getMongoose
+const getRawSelect = require('./pegjs/getRawSelect.js')
+
+/**
+ * @typedef RawField
+ * @property {String} name
+ * @property {RawSelect} select
+ */
+
+/**
+ * @typedef RawSelect
+ * @property {Boolean} all
+ * @property {RawField[]} fields
+ */
+
+
+/**
+ * @typedef ParseResult
+ * @property {String[]} select 
+ * @property {MongoosePopulate[]} populate
+ */
+
+/**
+ * @typedef MongoosePopulate
+ * @property {String} path
+ * @property {String[]} select
+ * @property {MongoosePopulate[]} populate
+ */
+
+/**
+ * Get {select,populate} from schema by select data
+ * @param {RawSelect} select
+ */
+const parseSchema = (schema, select) => {
+    let { all, fields } = select
+
+    let result = {
+        select: [],
+        populate: []
+    }
+
+    let allPaths = Object.keys(schema.paths)
+
+    if (all) {
+        let otherPaths = getOtherChildPaths(allPaths, '', fields.map(({ name }) => name))
+        result.select.push(...otherPaths)
+    }
+
+    fields.forEach(({ name, select }) => {
+        let { select: _select, populate: _populate } = parsePaths(schema, allPaths, name, select)
+        result.select.push(..._select)
+        result.populate.push(..._populate)
+    })
+
+    return result
+}
+
+/**
+ * Get other path at child level not contain declared childName
+ * @param {Array} allPaths All path
+ * @param {String} parentPath Parent path
+ * @param {Array} childNames List names of child paths (example:parentPath=user.address, childNames=[street,city]) 
+ * @return {Array} List of other paths
+ */
+const getOtherChildPaths = (allPaths, parentPath, childNames) => {
+    let childNameMap = {}
+    childNames.forEach(name => childNameMap[name] = true)
+    let parentPathLength = parentPath.split('.').filter(bit => bit).length
+    scopedPaths = allPaths.filter(path => path.startsWith(parentPath)).map(path => path.split('.').slice(0, parentPathLength + 1))
+    scopedPaths = [... new Set(scopedPaths)].filter(pathBits => pathBits.length > parentPathLength)
+
+    let otherPaths = scopedPaths.filter(pathBits => !childNameMap[pathBits[parentPathLength]])
+    return otherPaths
+}
+
+/**
+ * Parse path
+ * @param {Object} schema Mongoose schema
+ * @param {String[]} allPaths List of string paths
+ * @param {String} path Current path string
+ * @param {RawSelect} select Select fields data
+ * @return {ParseResult} Select and populate data in mongoose query
+ */
+const parsePath = (schema, allPaths, path, select) => {
+
+    if (!select) {
+        return {
+            select: [path]
+        }
+    }
+
+    let result = {
+        select: [],
+        pupulate: []
+    }
+
+    if (select.all) {
+        let otherPaths = getOtherChildPaths(allPaths, path, select.fields.map(({ name }) => name))
+        result.select.push(otherPaths)
+    }
+
+    // Is virtual
+    if (schema.virtuals[path]) {
+
+        let field = schema.virtuals[path]
+        if (field.options &amp;&amp; field.options.ref) {
+            let relatedModel
+            try {
+                relatedModel = getMongoose().model(field.options.ref)
+            } catch (e) {
+                throw e
+            }
+
+            let relatedSchema = relatedModel.schema
+
+            let { select: relatedSelect, populate: relatedPopulate } = parseSchema(relatedSchema, select)
+
+            result.populate.push({
+                path,
+                select: relatedSelect,
+                populate: relatedPopulate
+            })
+        }
+    }
+
+    // Is related
+    else if (schema.paths[path] &amp;&amp; schema.paths[path].options.type === getMongoose().Schema.Types.ObjectId) {
+        let field = schema.paths[path]
+        let relatedModel
+        try {
+            relatedModel = getMongoose().model(field.options.ref)
+        } catch (e) {
+            throw e
+        }
+
+        let relatedSchema = relatedModel.schema
+
+        let { select: relatedSelect, populate: relatedPopulate } = parseSchema(relatedSchema, select)
+
+        result.populate.push({
+            path: path,
+            select: relatedSelect,
+            populate: relatedPopulate
+        })
+    }
+
+    // Is nestest schema
+    else if (schema.paths[path] &amp;&amp; schema.paths[path].schema) {
+
+        let relatedSchema = schema.paths[path].schema
+
+        let { select: relatedSelect, populate: relatedPopulate } = parseSchema(relatedSchema, select)
+
+        result.populate.push(relatedPopulate.map(({ path: childPath, select, populate }) => ({
+            path: path + '.' + childPath,
+            select,
+            populate
+        })))
+        result.select.push(relatedSelect.map(childPath => path + '.' + childPath))
+    }
+
+    // Is local field
+    else if (schema.paths[path]) {
+        result.select.push(path)
+    }
+    // Is local Object
+    else if (allPaths.find(path => path.startsWith(path))) {
+
+        select.fields.forEach(({ name, select }) => {
+            let { select: _select, populate: _populate } = parsePath(schema, allPaths, path + '.' + name, select)
+            result.select.push(..._select)
+            result.populate.push(..._populate)
+        })
+    }
+
+    return result
+}
+
+
+/**
+ * Get {select,populate} data used for mongoose from smart select text
+ * @param {Object} model Mongoose model (exam: User, Post, Category, ...)
+ * @param {String} text Smart select text (exam: 'post{image,name,category{name},text}')
+ * @return {ParseResult} Select and populate data in mongoose
+ */
+const parseSmartSelect = (model, text) => {
+    if (!text)
+        return {
+            select: [],
+            populate: []
+        }
+    let rawData
+    try {
+        rawData = getRawSelect.parse(text)
+    } catch (e) {
+        throw new Error('Smart select text invalid')
+    }
+    return parsePath(model, rawData)
+}
+module.exports = parseSmartSelect</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 3.5.5</a> on Fri Nov 09 2018 15:40:03 GMT+0700 (+07) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/linenumber.js"></script>
+
+
+</body>
+</html>
