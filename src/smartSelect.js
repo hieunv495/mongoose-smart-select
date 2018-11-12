@@ -29,7 +29,9 @@ const getRawSelect = require('./pegjs/getRawSelect.js')
 
 /**
  * Get {select,populate} from schema by select data
- * @param {RawSelect} select
+ * @param {Object} schema Mongoose schema
+ * @param {RawSelect} select Raw select after use pegjs parser
+ * @return {ParseResult}
  */
 const parseSchema = (schema, select) => {
     let { all, fields } = select
@@ -121,6 +123,8 @@ const parsePath = (schema, allPaths, path, select) => {
                 select: relatedSelect,
                 populate: relatedPopulate
             })
+
+            result.select.push(path)
         }
     }
 
@@ -143,21 +147,23 @@ const parsePath = (schema, allPaths, path, select) => {
             select: relatedSelect,
             populate: relatedPopulate
         })
+
+        result.select.push(path)
     }
 
-    // Is nestest schema
+    // Is schema
     else if (schema.paths[path] && schema.paths[path].schema) {
 
         let relatedSchema = schema.paths[path].schema
 
         let { select: relatedSelect, populate: relatedPopulate } = parseSchema(relatedSchema, select)
 
-        result.populate.push(relatedPopulate.map(({ path: childPath, select, populate }) => ({
+        result.populate.push(...relatedPopulate.map(({ path: childPath, select, populate }) => ({
             path: path + '.' + childPath,
             select,
             populate
         })))
-        result.select.push(relatedSelect.map(childPath => path + '.' + childPath))
+        result.select.push(...relatedSelect.map(childPath => path + '.' + childPath))
     }
 
     // Is local field
